@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Status](https://img.shields.io/badge/status-activo-brightgreen)
 
-Herramienta para recolectar datos de contacto de negocios desde Google Maps a escala nacional. Diseñada para proyectos de logística que requieren identificar proveedores y colaboradores en múltiples categorías y distritos.
+Herramienta para recolectar datos de contacto de negocios desde Google Maps. Diseñada para proyectos de logística que requieren identificar proveedores y colaboradores en múltiples categorías y distritos.
 
 ---
 
