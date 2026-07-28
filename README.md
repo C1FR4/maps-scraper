@@ -60,9 +60,7 @@ git clone https://github.com/C1FR4/maps-scraper.git
 cd maps-scraper
 npm install
 
-# 3. Edita config.json con tus categorías y distritos
-
-# 4. Ejecuta
+# 3. Ejecuta
 npm start
 ```
 
@@ -70,45 +68,25 @@ npm start
 
 ## Configuración
 
-### ⚡ Configuración interactiva (recomendada)
+### Categorías y distritos
 
-Al ejecutar el programa, **se te pedirá ingresar** las categorías y distritos que deseas buscar.  
-No es necesario editar ningún archivo — solo escribe tus valores cuando el programa los solicite.
+El programa te pedirá ingresar **tus propias categorías y distritos** al iniciar.  
+Escribe los valores separados por coma — puedes poner tantos como necesites:
 
 ```
- Categorías a buscar (separadas por coma):
-   Ej: Cafetería, Restaurante peruano, Tienda de ropa
- >
+?  Categorías a buscar [1/2]
+   › Cafetería, Restaurante peruano, Tienda de ropa
+
+?  Distritos a buscar [2/2]
+   › Miraflores Lima, Barranco Lima, San Isidro Lima
 ```
 
-> Los valores en `config.json` para `CATEGORIAS` y `DISTRITOS` son solo ejemplos de referencia.  
-> El programa **siempre** te pedirá ingresar tus propios valores al iniciar.
+Cada combinación de categoría × distrito genera una búsqueda en Google Maps.  
+Por ejemplo, con 3 categorías y 3 distritos se ejecutarán 9 búsquedas.
 
-### Archivo `config.json`
+### Parámetros adicionales (`config.json`)
 
-```json
-{
-  "archivoExcel": "contactos.xlsx",
-  "maxResultadosPorBusqueda": 50,
-  "visitarWebDelNegocio": true,
-  "esperaMsEntreBusquedas": 3000,
-  "umbralTextoUtil": 400,
-  "concurrencia": 5,
-  "concurrenciaFichas": 4,
-
-  "palabrasContacto": [
-    "contacto", "contactenos", "contact", "contactus",
-    "ubicacion", "ubicaciones", "locales", "tiendas", "sucursales"
-  ],
-
-  "CATEGORIAS": [
-    "ejemplo-categoria-1"
-  ],
-  "DISTRITOS": [
-    "ejemplo-distrito-1"
-  ]
-}
-```
+Se pueden ajustar en `config.json` sin necesidad de editar categorías ni distritos:
 
 | Parámetro | Descripción | Default |
 |---|---|---|
@@ -119,9 +97,7 @@ No es necesario editar ningún archivo — solo escribe tus valores cuando el pr
 | `umbralTextoUtil` | Mínimo de texto para considerar página válida | `400` |
 | `concurrencia` | Cuántas webs visita en paralelo | `5` |
 | `concurrenciaFichas` | Cuántas fichas de Maps extrae en paralelo | `4` |
-| `palabrasContacto` | Palabras clave para detectar subpáginas de contacto | — |
-| `CATEGORIAS` | ⚠ Solo referencia — se ingresan al ejecutar | — |
-| `DISTRITOS` | ⚠ Solo referencia — se ingresan al ejecutar | — |
+| `palabrasContacto` | Palabras clave para detectar subpáginas de contacto | `[contacto, contactenos, ...]` |
 
 ---
 
