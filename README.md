@@ -55,7 +55,7 @@ Reanudación automática: si se interrumpe, retoma donde quedó
 git clone https://github.com/C1FR4/maps-scraper.git
 
 # 2. Instala las dependencias
-cd google-maps-contact-scraper
+cd maps-scraper
 npm install
 
 # 3. Edita config.json con tus categorías y distritos
