@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const pLimit = require("p-limit").default;
 const Database = require("better-sqlite3");
+const readline = require("readline/promises");
 
 // ─── CARGAR CONFIGURACIÓN DESDE config.json ───────────────────────
 const configPath = path.join(__dirname, "config.json");
@@ -13,6 +14,55 @@ if (!fs.existsSync(configPath)) {
   process.exit(1);
 }
 const CONFIG = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+// ─────────────────────────────────────────────────────────────────
+
+// ─── CONFIGURACIÓN INTERACTIVA (categorías y distritos) ──────────
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+async function preguntarConfiguracion() {
+  const dim = "\x1b[2m";
+  const cyan = "\x1b[36m";
+  const reset = "\x1b[0m";
+
+  console.log(`\n${"═".repeat(50)}`);
+  console.log(` CONFIGURACIÓN INICIAL`);
+  console.log(` Los valores en config.json son solo ejemplos de referencia.`);
+  console.log(` Debes ingresar TUS propias categorías y distritos a buscar.`);
+  console.log(`${"═".repeat(50)}`);
+
+  let categorias = [];
+  while (categorias.length === 0) {
+    const resp = await rl.question(
+      `\n${cyan}?${reset}  Categorías a buscar ${dim}[1/2]${reset}\n   ${dim}›${reset} `
+    );
+    categorias = resp.split(",").map((s) => s.trim()).filter(Boolean);
+    if (categorias.length === 0) {
+      console.log(`   ${dim}Debes ingresar al menos una categoría.${reset}`);
+    }
+  }
+
+  let distritos = [];
+  while (distritos.length === 0) {
+    const resp = await rl.question(
+      `\n${cyan}?${reset}  Distritos a buscar ${dim}[2/2]${reset}\n   ${dim}›${reset} `
+    );
+    distritos = resp.split(",").map((s) => s.trim()).filter(Boolean);
+    if (distritos.length === 0) {
+      console.log(`   ${dim}Debes ingresar al menos un distrito.${reset}`);
+    }
+  }
+
+  rl.close();
+
+  CONFIG.CATEGORIAS = categorias;
+  CONFIG.DISTRITOS = distritos;
+
+  console.log(`\n   ${categorias.length} categorías · ${distritos.length} distritos · ${categorias.length * distritos.length} combinaciones\n`);
+}
 // ─────────────────────────────────────────────────────────────────
 
 // ─── SQLITE ────────────────────────────────────────────────────────
@@ -828,7 +878,38 @@ function terminoYaProcesado(termino) {
 
 // ─── MAIN ─────────────────────────────────────────────────────────
 
+function mostrarBanner() {
+  const artePath = path.join(__dirname, "arana_reducida.txt");
+  const spiderLines = fs.existsSync(artePath)
+    ? fs.readFileSync(artePath, "utf-8").split("\n").filter(l => l.length > 0)
+    : [];
+
+  const titulo = [
+    "  GOOGLE MAPS",
+    "    CONTACT",
+    "    SCRAPER",
+    "     PERU v2",
+  ];
+  const anchoTitulo = 18;
+
+  const alto = spiderLines.length || 1;
+  const padTop = Math.floor((alto - titulo.length) / 2);
+  const padBot = alto - titulo.length - padTop;
+
+  const columnaTitulo = [];
+  for (let i = 0; i < padTop; i++) columnaTitulo.push("".padEnd(anchoTitulo));
+  for (const t of titulo) columnaTitulo.push(t.padEnd(anchoTitulo));
+  for (let i = 0; i < padBot; i++) columnaTitulo.push("".padEnd(anchoTitulo));
+
+  for (let i = 0; i < alto; i++) {
+    const der = spiderLines[i] || "";
+    console.log(columnaTitulo[i] + "  " + der);
+  }
+}
+
 async function main() {
+  mostrarBanner();
+  await preguntarConfiguracion();
   const terminos = generarTerminosDeBusqueda();
   const totalCombinaciones = CONFIG.CATEGORIAS.length * CONFIG.DISTRITOS.length;
   const concurrencia = CONFIG.concurrencia || 5;
@@ -848,7 +929,14 @@ async function main() {
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--lang=es-PE"],
   });
 
-  const pool = await crearPoolPaginas(browser, concurrenciaFichas);
+  let pool = [];
+  try {
+    pool = await crearPoolPaginas(browser, concurrenciaFichas);
+  } catch (err) {
+    console.error(` Error creando pool de páginas: ${err.message}`);
+    await browser.close();
+    process.exit(1);
+  }
   const gestor = crearGestorPool(pool);
   const limit = pLimit(concurrencia);
 
@@ -885,7 +973,10 @@ async function main() {
           fichasOk = true;
           break;
         } catch (err) {
-          if (err.name !== 'BlockError') throw err;
+          if (err.name !== 'BlockError') {
+            console.error(`   Error inesperado en fichas: ${err.message}`);
+            break;
+          }
           if (intento < 2) {
             console.warn(`   Reintentando tras posible bloqueo (intento ${intento + 1}/3) en 60s...`);
             await esperarMs(60000);

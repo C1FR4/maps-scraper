@@ -68,7 +68,23 @@ npm start
 
 ---
 
-## Configuración (`config.json`)
+## Configuración
+
+### ⚡ Configuración interactiva (recomendada)
+
+Al ejecutar el programa, **se te pedirá ingresar** las categorías y distritos que deseas buscar.  
+No es necesario editar ningún archivo — solo escribe tus valores cuando el programa los solicite.
+
+```
+ Categorías a buscar (separadas por coma):
+   Ej: Cafetería, Restaurante peruano, Tienda de ropa
+ >
+```
+
+> Los valores en `config.json` para `CATEGORIAS` y `DISTRITOS` son solo ejemplos de referencia.  
+> El programa **siempre** te pedirá ingresar tus propios valores al iniciar.
+
+### Archivo `config.json`
 
 ```json
 {
@@ -86,22 +102,10 @@ npm start
   ],
 
   "CATEGORIAS": [
-    "Cafetería",
-    "Restaurante peruano",
-    "Tienda de ropa"
+    "ejemplo-categoria-1"
   ],
-
   "DISTRITOS": [
-    "Miraflores Lima",
-    "Barranco Lima",
-    "San Isidro Lima",
-    "Lince Lima",
-    "Jesús María Lima",
-    "Magdalena del Mar Lima",
-    "Pueblo Libre Lima",
-    "San Miguel Lima",
-    "Surquillo Lima",
-    "Santiago de Surco Lima"
+    "ejemplo-distrito-1"
   ]
 }
 ```
@@ -116,8 +120,8 @@ npm start
 | `concurrencia` | Cuántas webs visita en paralelo | `5` |
 | `concurrenciaFichas` | Cuántas fichas de Maps extrae en paralelo | `4` |
 | `palabrasContacto` | Palabras clave para detectar subpáginas de contacto | — |
-| `CATEGORIAS` | Tipos de negocio a buscar | — |
-| `DISTRITOS` | Distritos / zonas donde buscar | — |
+| `CATEGORIAS` | ⚠ Solo referencia — se ingresan al ejecutar | — |
+| `DISTRITOS` | ⚠ Solo referencia — se ingresan al ejecutar | — |
 
 ---
 

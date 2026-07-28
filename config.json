@@ -20,20 +20,9 @@
   ],
 
   "CATEGORIAS": [
-    "Cafetería",
-    "Restaurante peruano",
-    "Tienda de ropa"
+    "ejemplo-categoria-1"
   ],
   "DISTRITOS": [
-    "Miraflores Lima",
-    "Barranco Lima",
-    "San Isidro Lima",
-    "Lince Lima",
-    "Jesús María Lima",
-    "Magdalena del Mar Lima",
-    "Pueblo Libre Lima",
-    "San Miguel Lima",
-    "Surquillo Lima",
-    "Santiago de Surco Lima"
+    "ejemplo-distrito-1"
   ]
 }

@@ -15,6 +15,9 @@
     "puppeteer",
     "contact-extractor"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "author": "C1FR4",
   "license": "MIT",
   "dependencies": {
