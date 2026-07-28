@@ -135,15 +135,19 @@ Genera `contactos.xlsx` con:
 
 ---
 
-## Características técnicas
+## Características
 
 - **Fetch-first**: intenta obtener la web con `fetch` (rápido); si la página requiere JS, cae automáticamente a Puppeteer.
 - **Extracción paralela de fichas**: pool de 4 páginas de Puppeteer extrayendo fichas de Maps simultáneamente.
 - **Pool persistente**: las páginas se crean una vez y se reúsan entre términos de búsqueda.
 - **Reanudación automática**: si el proceso se interrumpe, al retomar salta los términos ya procesados (basado en SQLite).
 - **Detección de bloqueo**: si Google detecta tráfico automatizado, espera 60s y reintenta una vez antes de fallar controladamente.
-- **Filtro de redes sociales**: descarta enlaces falsos de Facebook (login, share, recover, photo, l.php, messages, events, etc.) y WhatsApp sin número.
 - **Extracción desde URL social**: si un negocio tiene Instagram/Facebook como su "sitio web" en Maps, el handle se extrae directamente.
+- **Filtro de redes sociales**: descarta enlaces falsos de Facebook (login, share, recover, photo, l.php, messages, events, etc.) y WhatsApp sin número.
+- **Filtro de correos basura**: descarta dominios de tracking (Sentry, Hotjar, Klaviyo, etc.) y extensiones de archivo.
+- **Normalización de teléfonos**: elimina prefijo +51, 51 y 0 de números peruanos.
+- **Pausas aleatorias**: agrega delays variables para simular comportamiento humano.
+- **Sin API keys**: no requiere claves ni proxies pagados.
 
 ---
 
@@ -152,22 +156,11 @@ Genera `contactos.xlsx` con:
 Para 30 términos (ej: 3 categorías × 10 distritos) y ~500 negocios:
 
 | Fase | Por término |
-|---|---|
+|---|---|---|
 | Maps scroll + enlaces | ~15s |
 | Fichas en paralelo | ~20s |
 | Enriquecimiento web | ~60–90s |
-| **Total estimado** | **20–25 minutos**
-
----
-
-## Notas
-
-- Usa **fetch** como primera opción (rápido) y **Puppeteer** como fallback automático para páginas renderizadas con JS.
-- Detecta y visita subpáginas de contacto dentro del mismo dominio.
-- Normaliza teléfonos peruanos (elimina prefijo +51, 51, 0).
-- Filtra correos falsos de dominios de tracking (Sentry, Hotjar, Klaviyo, etc.) y extensiones de archivo.
-- Agrega pausas aleatorias para simular comportamiento humano.
-- No requiere API keys ni proxies pagados.
+| **Total estimado** | **20–25 minutos** |
 
 ---
 

@@ -15,7 +15,7 @@
     "puppeteer",
     "contact-extractor"
   ],
-  "author": "",
+  "author": "C1FR4",
   "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^11.7.0",
