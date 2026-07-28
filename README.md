@@ -50,6 +50,8 @@ Reanudación automática: si se interrumpe, retoma donde quedó
 
 **Requisitos:** Node.js 18 o superior
 
+> **Nota:** Al ejecutar `npm install`, Puppeteer descargará Chromium (~300 MB) automáticamente.
+
 ```bash
 # 1. Clona el repositorio
 git clone https://github.com/C1FR4/maps-scraper.git
