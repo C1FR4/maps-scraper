@@ -28,11 +28,7 @@ async function preguntarConfiguracion() {
   const cyan = "\x1b[36m";
   const reset = "\x1b[0m";
 
-  console.log(`\n${"═".repeat(50)}`);
-  console.log(` CONFIGURACIÓN INICIAL`);
-  console.log(` Los valores en config.json son solo ejemplos de referencia.`);
-  console.log(` Debes ingresar TUS propias categorías y distritos a buscar.`);
-  console.log(`${"═".repeat(50)}`);
+  console.log();
 
   let categorias = [];
   while (categorias.length === 0) {
