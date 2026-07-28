@@ -6,6 +6,8 @@ contactos.xlsx
 contactos_temp.xlsx
 *.xlsx
 *.db
+*.db-shm
+*.db-wal
 
 # Variables de entorno
 .env

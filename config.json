@@ -20,20 +20,20 @@
   ],
 
   "CATEGORIAS": [
-  "Cafetería",
-  "Restaurante peruano",
-  "Tienda de ropa"
-],
+    "Cafetería",
+    "Restaurante peruano",
+    "Tienda de ropa"
+  ],
   "DISTRITOS": [
-  "Miraflores Lima",
-  "Barranco Lima",
-  "San Isidro Lima",
-  "Lince Lima",
-  "Jesús María Lima",
-  "Magdalena del Mar Lima",
-  "Pueblo Libre Lima",
-  "San Miguel Lima",
-  "Surquillo Lima",
-  "Santiago de Surco Lima"
-]
+    "Miraflores Lima",
+    "Barranco Lima",
+    "San Isidro Lima",
+    "Lince Lima",
+    "Jesús María Lima",
+    "Magdalena del Mar Lima",
+    "Pueblo Libre Lima",
+    "San Miguel Lima",
+    "Surquillo Lima",
+    "Santiago de Surco Lima"
+  ]
 }
