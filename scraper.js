@@ -875,10 +875,24 @@ function terminoYaProcesado(termino) {
 // ─── MAIN ─────────────────────────────────────────────────────────
 
 function mostrarBanner() {
-  const artePath = path.join(__dirname, "arana_reducida.txt");
-  const spiderLines = fs.existsSync(artePath)
-    ? fs.readFileSync(artePath, "utf-8").split("\n").filter(l => l.length > 0)
-    : [];
+  const spiderLines = [
+    "                                     ",
+    "         *                  *        ",
+    "         *                  *        ",
+    "         *                 **        ",
+    "         +*=+* +=;;;+********        ",
+    "          +=++++:;:-:;-+**+*         ",
+    "     *=**++++***+++*+****++**+*+*    ",
+    "    *******+**+*-*-=+ +***********   ",
+    "   +     *******==**= **+*=*=    =*  ",
+    "  *    **** ***  -  - ***+ ***+   ** ",
+    "      *++*  * +       =* + *+****    ",
+    "      *  +* *           ** ** **     ",
+    "      *  *+                ** **     ",
+    "       *  +*+            ***  *      ",
+    "            *           +*           ",
+    "             +         *             ",
+  ];
 
   const titulo = [
     "  GOOGLE MAPS",
@@ -888,7 +902,7 @@ function mostrarBanner() {
   ];
   const anchoTitulo = 18;
 
-  const alto = spiderLines.length || 1;
+  const alto = spiderLines.length;
   const padTop = Math.floor((alto - titulo.length) / 2);
   const padBot = alto - titulo.length - padTop;
 
@@ -898,8 +912,7 @@ function mostrarBanner() {
   for (let i = 0; i < padBot; i++) columnaTitulo.push("".padEnd(anchoTitulo));
 
   for (let i = 0; i < alto; i++) {
-    const der = spiderLines[i] || "";
-    console.log(columnaTitulo[i] + "  " + der);
+    console.log(columnaTitulo[i] + "  " + spiderLines[i]);
   }
 }
 

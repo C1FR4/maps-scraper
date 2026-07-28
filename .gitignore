@@ -13,6 +13,9 @@ contactos_temp.xlsx
 .env
 .env.local
 
+# Archivos de arte ASCII (se embebieron en el codigo)
+arana_reducida.txt
+
 # Logs
 *.log
 npm-debug.log*
