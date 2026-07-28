@@ -149,16 +149,14 @@ Genera `contactos.xlsx` con:
 
 ## Tiempo estimado
 
-Para 30 términos (ej: 3 categorías × 10 distritos):
+Para 30 términos (ej: 3 categorías × 10 distritos) y ~500 negocios:
 
 | Fase | Por término |
 |---|---|
 | Maps scroll + enlaces | ~15s |
 | Fichas en paralelo | ~20s |
 | Enriquecimiento web | ~60–90s |
-| **Total estimado** | **30–45 minutos** |
-
-~200–500 negocios en el Excel final.
+| **Total estimado** | **20–25 minutos**
 
 ---
 
