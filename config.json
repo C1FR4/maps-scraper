@@ -1,7 +1,7 @@
 {
   "archivoExcel": "contactos.xlsx",
   "maxResultadosPorBusqueda": 50,
-  "visitarWebDelNegocio": true,
+  "visitarWebDelNegocio": false,
   "esperaMsEntreBusquedas": 3000,
   "umbralTextoUtil": 400,
   "concurrencia": 5,
@@ -18,6 +18,10 @@
     "tiendas",
     "sucursales"
   ],
+
+  "palabrasLocalPlaceholder": ["noreply", "no-reply", "placeholder", "dummy", "ejemplo", "example", "test", "tuemail", "tucorreo"],
+  "dominiosPlaceholder": ["example.com", "test.com", "dominio.com", "tudominio.com", "yourdomain.com"],
+  "agregadoresLinkInBio": ["linktr.ee", "beacons.ai", "linkin.bio", "bio.link", "solo.to", "lnk.bio", "allmylinks.com"],
 
   "CATEGORIAS": [
     "ejemplo-categoria-1"

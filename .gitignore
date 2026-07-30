@@ -13,8 +13,7 @@ contactos_temp.xlsx
 .env
 .env.local
 
-# Archivos de arte ASCII (se embebieron en el codigo)
-arana_reducida.txt
+# Arte ASCII usado por banner.js
 
 # Logs
 *.log

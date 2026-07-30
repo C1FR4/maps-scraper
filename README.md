@@ -63,6 +63,14 @@ npm install
 # 3. Ejecuta
 npm start
 ```
+> **Nota para Windows:** Si usas `npm start` desde el **Símbolo del sistema clásico (cmd.exe)** y presionas Ctrl+C, puede aparecer el mensaje `"¿Desea terminar el trabajo por lotes (S/N)?"`. Esto es comportamiento de Windows/npm, no del scraper. Recomendaciones:
+> - Ejecuta con `node scraper.js` directamente para que el menú interactivo de pausa funcione correctamente.
+> - O usa **PowerShell** o **Windows Terminal** en vez de cmd.exe — no tienen ese mensaje heredado.
+> - Pase lo que pase, los datos ya recolectados están guardados en `contactos.db`. Siempre puedes recuperarlos con:
+>   ```bash
+>   node scraper.js --export
+>   ```
+>   Esto genera el Excel con todo lo recolectado hasta el momento sin volver a scrapear. Los términos ya completados se saltarán solos al reanudar.
 
 ---
 
@@ -71,7 +79,7 @@ npm start
 ### Categorías y distritos
 
 El programa te pedirá ingresar **tus propias categorías y distritos** al iniciar.  
-Escribe los valores separados por coma — puedes poner tantos como necesites:
+Escribe los valores separados por coma - puedes poner tantos como necesites:
 
 ```
 ?  Categorías a buscar [1/2]
@@ -98,6 +106,9 @@ Se pueden ajustar en `config.json` sin necesidad de editar categorías ni distri
 | `concurrencia` | Cuántas webs visita en paralelo | `5` |
 | `concurrenciaFichas` | Cuántas fichas de Maps extrae en paralelo | `4` |
 | `palabrasContacto` | Palabras clave para detectar subpáginas de contacto | `[contacto, contactenos, ...]` |
+| `palabrasLocalPlaceholder` | Frases en la parte local del correo a descartar | `[noreply, placeholder, dummy, ...]` |
+| `dominiosPlaceholder` | Dominios completos a descartar como correo | `[example.com, test.com, ...]` |
+| `agregadoresLinkInBio` | Dominios agregadores que no se scrapean | `[linktr.ee, beacons.ai, ...]` |
 
 ---
 
@@ -105,7 +116,7 @@ Se pueden ajustar en `config.json` sin necesidad de editar categorías ni distri
 
 Genera `contactos.xlsx` con:
 
-- 15 columnas limpias (sin columnas técnicas)
+- 17 columnas: incluye Método (maps / maps+web) y Vía (fetch / puppeteer)
 - Encabezado azul oscuro con texto blanco, fila congelada
 - Filas con colores alternos (blanco / azul claro)
 - Filtros automáticos en todas las columnas
@@ -128,6 +139,8 @@ Genera `contactos.xlsx` con:
 - **Normalización de teléfonos**: elimina prefijo +51, 51 y 0 de números peruanos.
 - **Pausas aleatorias**: agrega delays variables para simular comportamiento humano.
 - **Sin API keys**: no requiere claves ni proxies pagados.
+- **Exportación directa**: `node scraper.js --export` genera el Excel desde la BD sin volver a scrapear.
+- **Manejo de Ctrl+C**: menú interactivo con opciones para continuar, terminar y exportar, o pausar (guarda progreso para reanudar después).
 
 ---
 

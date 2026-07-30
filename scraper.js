@@ -6,6 +6,7 @@ const path = require("path");
 const pLimit = require("p-limit").default;
 const Database = require("better-sqlite3");
 const readline = require("readline/promises");
+const { mostrarBanner } = require("./banner.js");
 
 // ─── CARGAR CONFIGURACIÓN DESDE config.json ───────────────────────
 const configPath = path.join(__dirname, "config.json");
@@ -89,19 +90,55 @@ db.exec(`
   )
 `);
 
+// Columnas de fuente/confianza (segura para re-ejecución)
+const columnasFuente = ['fuente_instagram', 'fuente_facebook', 'fuente_tiktok'];
+for (const col of columnasFuente) {
+  try { db.exec(`ALTER TABLE negocios ADD COLUMN ${col} TEXT DEFAULT ''`); } catch (_) {}
+}
+
+// Índices para acelerar deduplicación
+db.exec("CREATE INDEX IF NOT EXISTS idx_url_maps ON negocios(url_maps)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_nombre_web ON negocios(nombre, web)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_nombre_direccion ON negocios(nombre, direccion)");
+
+function checkpointWAL() {
+  db.pragma("wal_checkpoint(TRUNCATE)");
+}
+
+const existeDuplicado = db.prepare(`
+  SELECT id FROM negocios
+  WHERE (url_maps != '' AND url_maps = @url_maps)
+     OR (web != '' AND web = @web COLLATE NOCASE AND nombre = @nombre COLLATE NOCASE)
+     OR (direccion != '' AND direccion = @direccion COLLATE NOCASE AND nombre = @nombre COLLATE NOCASE)
+  LIMIT 1
+`);
+
 const insertNegocio = db.prepare(`
   INSERT INTO negocios (
     nombre, categoria, valoracion, telefono_maps, telefono_web,
     correo, whatsapp, instagram, facebook, tiktok,
-    direccion, web, url_maps, busqueda, metodo, via, estado
+    direccion, web, url_maps, busqueda, metodo, via, estado,
+    fuente_instagram, fuente_facebook, fuente_tiktok
   ) VALUES (
     @nombre, @categoria, @valoracion, @telefono_maps, @telefono_web,
     @correo, @whatsapp, @instagram, @facebook, @tiktok,
-    @direccion, @web, @url_maps, @busqueda, @metodo, @via, @estado
+    @direccion, @web, @url_maps, @busqueda, @metodo, @via, @estado,
+    @fuente_instagram, @fuente_facebook, @fuente_tiktok
   )
 `);
 
 function guardarNegocio(datos) {
+  const nombre = (datos.Nombre || '').trim().toLowerCase();
+  const web = (datos.Web || '').trim().toLowerCase();
+  const urlMaps = (datos.URLMaps || '').trim();
+  const direccion = (datos.Dirección || '').trim().toLowerCase();
+
+  // Deduplicación: url_maps, nombre+web, o nombre+dirección
+  if (urlMaps || (nombre && web) || (nombre && direccion)) {
+    const dup = existeDuplicado.get({ nombre, web, url_maps: urlMaps, direccion });
+    if (dup) return;
+  }
+
   insertNegocio.run({
     nombre: datos.Nombre || '',
     categoria: datos.Categoría || '',
@@ -120,6 +157,9 @@ function guardarNegocio(datos) {
     metodo: datos.Método || '',
     via: datos.Vía || '',
     estado: datos.Estado || '',
+    fuente_instagram: datos.FuenteInstagram || '',
+    fuente_facebook: datos.FuenteFacebook || '',
+    fuente_tiktok: datos.FuenteTikTok || '',
   });
 }
 
@@ -129,13 +169,40 @@ function contarNegocios() {
 }
 // ─────────────────────────────────────────────────────────────────
 
+// Cargar TLDs válidos para validación de correos
+const TLDS_PATH = path.join(__dirname, "tlds.json");
+const TLDS_VALIDOS = new Set(
+  JSON.parse(fs.readFileSync(TLDS_PATH, "utf-8")).map((t) => t.toUpperCase())
+);
+
 // Dominios de herramientas de desarrollo / tracking que no son correos reales
 const DOMINIOS_BASURA =
   /sentry\.io|example\.com|amazonaws\.com|cloudfront\.net|w3\.org|schema\.org|hotjar\.com|klaviyo\.com|googleapis\.com|gstatic\.com|jquery\.com|bootstrapcdn\.com/i;
 
 // Extensiones de archivo para filtrar falsos correos
 const EXTENSIONES_NO_CORREO =
-  /\.(webp|png|jpg|jpeg|gif|svg|mp4|mp3|pdf|zip|ico|woff|woff2|ttf)$/i;
+  /\.(webp|png|jpg|jpeg|gif|svg|mp4|mp3|pdf|zip|ico|woff|woff2|ttf|wav|mpga|aac|flac|ogg)$/i;
+
+// Palabras placeholder en la parte local del correo (antes de la @)
+const PALABRAS_LOCAL_PLACEHOLDER = (CONFIG.palabrasLocalPlaceholder || []).map((p) =>
+  p.toLowerCase()
+);
+const PALABRAS_LOCAL_PLACEHOLDER_RE = PALABRAS_LOCAL_PLACEHOLDER.length
+  ? new RegExp("\\b(" + PALABRAS_LOCAL_PLACEHOLDER.join("|") + ")\\b", "i")
+  : null;
+
+// Dominios placeholder completos a rechazar
+const DOMINIOS_PLACEHOLDER = (CONFIG.dominiosPlaceholder || []).map((d) =>
+  d.replace(/\./g, "\\.")
+);
+const DOMINIOS_PLACEHOLDER_RE = DOMINIOS_PLACEHOLDER.length
+  ? new RegExp(DOMINIOS_PLACEHOLDER.join("|"), "i")
+  : null;
+
+// Dominios de agregadores link-in-bio (no se pueden scrapear)
+const DOMINIOS_AGREGADORES = (CONFIG.agregadoresLinkInBio || []).map((d) =>
+  d.toLowerCase()
+);
 
 // Regex de emojis para limpiar texto antes de guardar en Excel
 const REGEX_EMOJI =
@@ -146,6 +213,44 @@ const REGEX = {
   telefono: /(\+?51[\s\-]?)?(9\d{8}|\d{7,8})\b/g,
   correo: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
 };
+
+// Rutas genéricas de Instagram que NO son perfiles de usuario
+const INSTAGRAM_NO_PROFILE = /^\/(stories|explore|accounts|direct|p(?:$|\/)|reels?(?:$|\/)|tv(?:$|\/)|shop(?:$|\/)|ar(?:$|\/)|login|signup|register|about|legal|privacy|terms|support|ads|graphql|oauth|authorize|create|share|web|developer|download|help|blog|press|jobs|safety|cookies|security|discover|language|report|remove)/i;
+
+// Usernames reservados (shouldbee/reserved-usernames) — defensa adicional contra colisiones
+const RESERVED_USERNAMES_PATH = path.join(__dirname, "instagram-reserved.json");
+const RESERVED_USERNAMES = new Set(
+  JSON.parse(fs.readFileSync(RESERVED_USERNAMES_PATH, "utf-8")).map((u) => u.toLowerCase())
+);
+
+const TIKTOK_RESERVED = new Set(["linktr.ee"]);
+
+function extraerUsuarioInstagram(url) {
+  try {
+    const parsed = new URL(url);
+    let path = parsed.pathname.replace(/\/+$/, '');
+    if (!path || path === '/') return null;
+    const segments = path.split('/').filter(Boolean);
+
+    if (!segments || segments.length === 0) return null;
+    const primero = segments[0];
+
+    if (primero.toLowerCase() === 'stories' && segments.length >= 2) {
+      const user = segments[1];
+      if (/^[a-zA-Z0-9._]{2,40}$/.test(user) && !['stories','explore','accounts','direct'].includes(user.toLowerCase())) return user;
+      return null;
+    }
+
+    if (INSTAGRAM_NO_PROFILE.test('/' + primero)) return null;
+
+    if (RESERVED_USERNAMES.has(primero.toLowerCase())) return null;
+
+    if (/^[a-zA-Z0-9._]{2,40}$/.test(primero)) return primero;
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
 
 // ─── GENERADOR DE BÚSQUEDAS ───────────────────────────────────────
 
@@ -184,7 +289,6 @@ function limpiarTexto(texto) {
 function normalizarTelefonoPe(digitos) {
   if (/^51[9][0-9]{8}$/.test(digitos)) return digitos.slice(2);
   if (/^51[0-9]{7,8}$/.test(digitos)) return digitos.slice(2);
-  if (/^0[1-9][0-9]{6,8}$/.test(digitos)) return digitos.slice(1);
   return digitos;
 }
 
@@ -196,15 +300,56 @@ function esTelefonoValido(t) {
   return true;
 }
 
-function limpiarTelefonos(texto) {
-  const matches = texto.match(REGEX.telefono) || [];
-  const validos = matches
-    .map((t) => normalizarTelefonoPe(t.replace(/\D/g, "")))
-    .filter((d) => esTelefonoValido(d));
-  return [...new Set(validos)].slice(0, 3).join(" | ");
+// ─── VALIDACIÓN OPCIONAL DE REDES SOCIALES (HEAD request) ───────
+// Deshabilitado por defecto (CONFIG.validarRedes) porque Instagram/TikTok
+// pueden devolver 200 incluso para perfiles inexistentes (login-wall).
+
+async function validarUrlRedSocial(urlCompleta) {
+  if (!CONFIG.validarRedes) return true;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(urlCompleta, {
+      method: 'HEAD',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+      },
+      redirect: 'follow',
+    });
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return true; // ante duda, asumir válido
+  }
+}
+// ─────────────────────────────────────────────────────────────────
+
+function esCorreoValido(correo) {
+  const m = correo.match(/^([a-zA-Z0-9._%+\-]+)@(.+)$/);
+  if (!m) return false;
+  const localPart = m[1].toLowerCase();
+  const dominio = m[2].toLowerCase();
+
+  // Rechazar si la parte local contiene palabras placeholder
+  if (PALABRAS_LOCAL_PLACEHOLDER_RE && PALABRAS_LOCAL_PLACEHOLDER_RE.test(localPart)) return false;
+
+  // Rechazar si el dominio está en lista de basura o dominios placeholder
+  if (DOMINIOS_BASURA.test(dominio)) return false;
+  if (DOMINIOS_PLACEHOLDER_RE && DOMINIOS_PLACEHOLDER_RE.test(dominio)) return false;
+
+  // Rechazar si parece una extensión de archivo (falso positivo de regex)
+  if (EXTENSIONES_NO_CORREO.test("." + dominio.split(".").pop())) return false;
+
+  // Validar que el TLD (última etiqueta) exista en IANA
+  const partes = dominio.split(".");
+  const tld = partes[partes.length - 1].toUpperCase();
+  if (!TLDS_VALIDOS.has(tld)) return false;
+
+  return true;
 }
 
-function extraerNumeroDeWhatsApp(href) {
+function limpiarTelefonoUnico(texto) {
   try {
     const parsed = new URL(href);
     const porPath = parsed.pathname.match(/\/([\d]+)/);
@@ -223,11 +368,20 @@ function buscarUrlContacto($, urlBase) {
   try {
     const base = new URL(urlBase);
     const origen = base.origin;
-    let encontrada = null;
+    const palabras = CONFIG.palabrasContacto;
+
+    function prioridad(href) {
+      const h = href.toLowerCase();
+      if (/contacto|contactenos|contactus|contact/i.test(h)) return 0;
+      if (/mensaje|escribenos|comunicate|comunicarse/i.test(h)) return 1;
+      if (/atencion|soporte|support/i.test(h)) return 2;
+      if (/ubicacion|ubicaciones|sucursales|tiendas|locales/i.test(h)) return 3;
+      return 4;
+    }
+
+    const candidatos = [];
 
     $("a[href]").each((_, el) => {
-      if (encontrada) return;
-
       const href = ($(el).attr("href") || "").trim();
       if (
         !href ||
@@ -237,18 +391,30 @@ function buscarUrlContacto($, urlBase) {
       )
         return;
 
-      const contieneContacto = CONFIG.palabrasContacto.some((p) =>
+      const contieneContacto = palabras.some((p) =>
         href.toLowerCase().includes(p)
       );
       if (!contieneContacto) return;
 
       try {
         const urlObj = new URL(href, urlBase);
-        if (urlObj.origin === origen) encontrada = urlObj.href;
+        if (urlObj.origin === origen) {
+          const esFooter = $(el).closest("footer").length > 0;
+          candidatos.push({ href: urlObj.href, prioridad: prioridad(href), esFooter });
+        }
       } catch (_) {}
     });
 
-    return encontrada;
+    if (candidatos.length === 0) return null;
+
+    candidatos.sort((a, b) => {
+      if (a.prioridad !== b.prioridad) return a.prioridad - b.prioridad;
+      if (a.esFooter && !b.esFooter) return -1;
+      if (!a.esFooter && b.esFooter) return 1;
+      return 0;
+    });
+
+    return candidatos[0].href;
   } catch (_) {
     return null;
   }
@@ -262,6 +428,14 @@ function combinarDatosContacto(datosPrincipal, datosContacto) {
     return [...set].slice(0, 5).join(" | ");
   };
 
+  const priorizarFuente = (fuenteA, fuenteB) => {
+    if (fuenteA === 'sameAs' && fuenteB !== 'sameAs') return fuenteA;
+    if (fuenteB === 'sameAs' && fuenteA !== 'sameAs') return fuenteB;
+    if (fuenteA === 'rel=me' && fuenteB === 'anchor') return fuenteA;
+    if (fuenteB === 'rel=me' && fuenteA === 'anchor') return fuenteB;
+    return fuenteA || fuenteB || 'anchor';
+  };
+
   return {
     telefonoWeb: combinar(datosPrincipal.telefonoWeb, datosContacto.telefonoWeb),
     correo: combinar(datosPrincipal.correo, datosContacto.correo),
@@ -269,6 +443,9 @@ function combinarDatosContacto(datosPrincipal, datosContacto) {
     instagram: combinar(datosPrincipal.instagram, datosContacto.instagram),
     facebook: combinar(datosPrincipal.facebook, datosContacto.facebook),
     tiktok: combinar(datosPrincipal.tiktok, datosContacto.tiktok),
+    fuenteInstagram: priorizarFuente(datosPrincipal.fuenteInstagram, datosContacto.fuenteInstagram),
+    fuenteFacebook: priorizarFuente(datosPrincipal.fuenteFacebook, datosContacto.fuenteFacebook),
+    fuenteTikTok: priorizarFuente(datosPrincipal.fuenteTikTok, datosContacto.fuenteTikTok),
   };
 }
 
@@ -308,36 +485,95 @@ function extraerCorreos($, textoVisible) {
   $("a[href^='mailto:']").each((_, el) => {
     const href = $(el).attr("href") || "";
     const correo = href.replace(/^mailto:/i, "").split("?")[0].trim().toLowerCase();
-    if (correo && !EXTENSIONES_NO_CORREO.test(correo) && !DOMINIOS_BASURA.test(correo)) {
-      correos.add(correo);
-    }
+    if (correo && esCorreoValido(correo)) correos.add(correo);
   });
 
   $("a").each((_, el) => {
     const texto = $(el).text().trim().toLowerCase();
     const matches = texto.match(REGEX.correo) || [];
     for (const m of matches) {
-      if (!EXTENSIONES_NO_CORREO.test(m) && !DOMINIOS_BASURA.test(m)) correos.add(m);
+      if (esCorreoValido(m)) correos.add(m);
     }
   });
 
   const matches = textoSanitizado.match(REGEX.correo) || [];
   for (const m of matches) {
     const correo = m.toLowerCase();
-    if (!EXTENSIONES_NO_CORREO.test(correo) && !DOMINIOS_BASURA.test(correo)) {
-      correos.add(correo);
-    }
+    if (esCorreoValido(correo)) correos.add(correo);
   }
 
   return [...correos].slice(0, 5).join(" | ");
 }
 
+function extraerRedesSemanticas($) {
+  const resultado = { Instagram: [], Facebook: [], TikTok: [], fuente: '' };
+
+  const procesarUrl = (url) => {
+    url = url.split('?')[0].split('#')[0].replace(/\/+$/, '');
+    if (/instagram\.com\//i.test(url)) {
+      const u = extraerUsuarioInstagram(url);
+      if (u) resultado.Instagram.push(`instagram.com/${u}`);
+    } else if (/facebook\.com\//i.test(url) && !/sharer|login|recover|\/photo(?:\/|\.php)|profile\.php|\/dialog\/|l\.php|\/followers?\/|\/following\/|\/messages(?:\/|$)|\/events(?:\/|$)|\/about|\/watch\/|\/marketplace\/|\/gaming\/|\/reels?\/|\/live\/|\/stories\/|\/jobs\/|\/business\/|\/developers\/|\/settings\/|\/saved\/|\/create\/|\/fundraisers\/|\/shopping\/|\/help\/|\/policies\/|\/ads\/|\/share\//i.test(url)) {
+      const m = url.match(/facebook\.com\/([^\s"'<>?#]+)/i);
+      if (m) resultado.Facebook.push(`facebook.com/${m[1]}`);
+    } else if (/tiktok\.com\/@/i.test(url)) {
+      const m = url.match(/tiktok\.com\/@([^\s"'<>?/]+)/i);
+      if (m && !TIKTOK_RESERVED.has(m[1].toLowerCase())) resultado.TikTok.push(`tiktok.com/@${m[1]}`);
+    }
+  };
+
+  // 1. JSON-LD sameAs
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const texto = $(el).html().trim();
+      if (!texto) return;
+      const data = JSON.parse(texto);
+      const extraerSameAs = (obj) => {
+        if (!obj) return;
+        if (Array.isArray(obj)) { obj.forEach(extraerSameAs); return; }
+        if (typeof obj === 'string') { procesarUrl(obj); return; }
+        if (obj.sameAs) {
+          if (Array.isArray(obj.sameAs)) obj.sameAs.forEach(procesarUrl);
+          else procesarUrl(obj.sameAs);
+        }
+        Object.values(obj).forEach(extraerSameAs);
+      };
+      extraerSameAs(data);
+    } catch (_) {}
+  });
+
+  // 2. <link rel="me">
+  $('link[rel="me"]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (href) procesarUrl(href);
+  });
+
+  if (resultado.Instagram.length || resultado.Facebook.length || resultado.TikTok.length) {
+    resultado.fuente = 'sameAs';
+  }
+
+  return resultado;
+}
+
 function extraerRedesSociales($) {
+  const semanticas = extraerRedesSemanticas($);
+  const instagramSem = semanticas.Instagram[0];
+  const facebookSem = semanticas.Facebook[0];
+  const tiktokSem = semanticas.TikTok[0];
+
+  const haySemanticas = instagramSem || facebookSem || tiktokSem;
+
   const redes = {
     WhatsApp: new Set(),
-    Instagram: new Set(),
-    Facebook: new Set(),
-    TikTok: new Set(),
+    Instagram: new Set(instagramSem ? [instagramSem] : []),
+    Facebook: new Set(facebookSem ? [facebookSem] : []),
+    TikTok: new Set(tiktokSem ? [tiktokSem] : []),
+  };
+
+  const fuente = {
+    Instagram: haySemanticas && instagramSem ? 'sameAs' : '',
+    Facebook: haySemanticas && facebookSem ? 'sameAs' : '',
+    TikTok: haySemanticas && tiktokSem ? 'sameAs' : '',
   };
 
   $("a[href]").each((_, el) => {
@@ -364,15 +600,15 @@ function extraerRedesSociales($) {
       } catch (_) {
         redes.WhatsApp.add(href);
       }
-    } else if (/instagram\.com\//i.test(href)) {
-      const m = href.match(/instagram\.com\/([a-zA-Z0-9._]{2,40})/i);
-      if (m) redes.Instagram.add(`instagram.com/${m[1]}`);
-        } else if (/facebook\.com\//i.test(href) && !/sharer|login|recover|\/photo(?:\/|\.php)|profile\.php|\/dialog\/|l\.php|\/followers?\/|\/following\/|\/messages(?:\/|$)|\/events(?:\/|$)|\/about/i.test(href) && !/facebook\.com\/facebook(?:\/|$)/i.test(href)) {
+    } else if (!instagramSem && /instagram\.com\//i.test(href)) {
+      const usuario = extraerUsuarioInstagram(href);
+      if (usuario) { redes.Instagram.add(`instagram.com/${usuario}`); fuente.Instagram = 'anchor'; }
+    } else if (!facebookSem && /facebook\.com\//i.test(href) && !/sharer|login|recover|\/photo(?:\/|\.php)|profile\.php|\/dialog\/|l\.php|\/followers?\/|\/following\/|\/messages(?:\/|$)|\/events(?:\/|$)|\/about|\/watch\/|\/marketplace\/|\/gaming\/|\/reels?\/|\/live\/|\/stories\/|\/jobs\/|\/business\/|\/developers\/|\/settings\/|\/saved\/|\/create\/|\/fundraisers\/|\/shopping\/|\/help\/|\/policies\/|\/ads\/|\/share\//i.test(href)) {
       const m = href.match(/facebook\.com\/([^\s"'<>?#]+)/i);
-      if (m) redes.Facebook.add(`facebook.com/${m[1]}`);
-    } else if (/tiktok\.com\/@/i.test(href)) {
+      if (m) { redes.Facebook.add(`facebook.com/${m[1]}`); fuente.Facebook = 'anchor'; }
+    } else if (!tiktokSem && /tiktok\.com\/@/i.test(href)) {
       const m = href.match(/tiktok\.com\/@([^\s"'<>?/]+)/i);
-      if (m) redes.TikTok.add(`tiktok.com/@${m[1]}`);
+      if (m && !TIKTOK_RESERVED.has(m[1].toLowerCase())) { redes.TikTok.add(`tiktok.com/@${m[1]}`); fuente.TikTok = 'anchor'; }
     }
   });
 
@@ -381,6 +617,7 @@ function extraerRedesSociales($) {
     Instagram: [...redes.Instagram].slice(0, 3).join(" | "),
     Facebook: [...redes.Facebook].slice(0, 3).join(" | "),
     TikTok: [...redes.TikTok].slice(0, 3).join(" | "),
+    fuente,
   };
 }
 
@@ -405,6 +642,9 @@ function extraerDatosDeHtml(html) {
     instagram: redes.Instagram,
     facebook: redes.Facebook,
     tiktok: redes.TikTok,
+    fuenteInstagram: redes.fuente.Instagram,
+    fuenteFacebook: redes.fuente.Facebook,
+    fuenteTikTok: redes.fuente.TikTok,
   };
 }
 
@@ -429,7 +669,10 @@ async function visitarWebConPuppeteer(url, browser) {
   } catch (e) {
     console.warn(`     Timeout o error cargando ${url}, procesando lo que haya...`);
   } finally {
-    html = await page.content();
+    html = await conReintentoNavegacion(
+      () => page.content(),
+      "page.content()"
+    );
     await page.close();
   }
   return html;
@@ -477,6 +720,25 @@ async function visitarUrl(url, browser) {
   }
 }
 
+// ─── REINTENTO ANTE ERRORES DE NAVEGACIÓN ─────────────────────────
+
+const MENSAJE_CONTEXT_DESTROYED = "Execution context was destroyed";
+
+async function conReintentoNavegacion(fn, etiqueta, maxReintentos = 2) {
+  for (let i = 0; i <= maxReintentos; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err.message && err.message.includes(MENSAJE_CONTEXT_DESTROYED) && i < maxReintentos) {
+        console.warn(`   Contexto destruido en ${etiqueta}, reintentando (${i + 1}/${maxReintentos})...`);
+        await esperarAleatorio(1000, 2000);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // ─── POOL DE PÁGINAS ─────────────────────────────────────────────
 
 async function crearPoolPaginas(browser, n) {
@@ -519,21 +781,23 @@ async function extraerFichaNegocio(pagina, enlace) {
   await pagina.goto(enlace, { waitUntil: "domcontentloaded", timeout: 15000 });
   await pagina.waitForSelector("h1", { timeout: 6000 }).catch(() => {});
 
-  const datos = await pagina.evaluate(() => {
-    const txt = (sel) => document.querySelector(sel)?.textContent?.trim() || "";
+  const datos = await conReintentoNavegacion(
+    () => pagina.evaluate(() => {
+      const txt = (sel) => document.querySelector(sel)?.textContent?.trim() || "";
 
     const nombre = txt("h1");
 
     let telefono = "";
-    document.querySelectorAll('button[data-item-id^="phone"]').forEach((btn) => {
-      telefono =
-        btn.getAttribute("aria-label")?.replace(/^Teléfono:\s*/i, "") || "";
-    });
+    const btnTelefono = document.querySelector('button[data-item-id^="phone"]');
+    if (btnTelefono) {
+      telefono = btnTelefono.getAttribute("aria-label")?.replace(/^Teléfono:\s*/i, "") || "";
+    }
     if (!telefono) {
-      document.querySelectorAll("button[aria-label]").forEach((btn) => {
+      const btnGenerico = [...document.querySelectorAll("button[aria-label]")].find((btn) => {
         const label = btn.getAttribute("aria-label") || "";
-        if (/^\+?[\d\s\-().]{7,}$/.test(label.trim())) telefono = label.trim();
+        return /^\+?[\d\s\-().]{7,}$/.test(label.trim());
       });
+      if (btnGenerico) telefono = btnGenerico.getAttribute("aria-label").trim();
     }
 
     let direccion = "";
@@ -561,7 +825,9 @@ async function extraerFichaNegocio(pagina, enlace) {
       txt(".F7nice span") || txt('[aria-label*="estrellas"]') || "";
 
     return { nombre, telefono, direccion, web, categoria, valoracion };
-  });
+    }),
+    "extraerFichaNegocio.evaluate()"
+  );
 
   if (datos.nombre) return { ...datos, urlMaps: enlace };
   return null;
@@ -644,15 +910,17 @@ async function buscarEnMaps(termino, browser) {
 // ─── PROCESAR FICHAS EN PARALELO ────────────────────────────────
 
 class BlockError extends Error {
-  constructor(message) {
+  constructor(message, negociosParciales = [], enlacesFallidos = []) {
     super(message);
     this.name = 'BlockError';
+    this.negociosParciales = negociosParciales;
+    this.enlacesFallidos = enlacesFallidos;
   }
 }
 
 async function procesarFichasEnParalelo(enlaces, gestor, concurrenciaFichas) {
   const limite = Math.min(enlaces.length, CONFIG.maxResultadosPorBusqueda);
-  if (limite === 0) return [];
+  if (limite === 0) return { negocios: [], fallidos: [] };
 
   const limitFichas = pLimit(concurrenciaFichas);
   let totalAttempted = 0;
@@ -669,11 +937,11 @@ async function procesarFichasEnParalelo(enlaces, gestor, concurrenciaFichas) {
           const datos = await extraerFichaNegocio(pagina, enlace);
           await esperarAleatorio(300, 700);
           if (!datos) nullCount++;
-          return datos;
+          return { enlace, datos };
         } catch (err) {
           console.warn(`   Error en ficha: ${err.message}`);
           nullCount++;
-          return null;
+          return { enlace, datos: null };
         } finally {
           gestor.liberar(pagina);
         }
@@ -681,15 +949,21 @@ async function procesarFichasEnParalelo(enlaces, gestor, concurrenciaFichas) {
     )
   );
 
-  const validos = resultados.filter(Boolean);
+  const negocios = resultados.filter((r) => r.datos).map((r) => r.datos);
+  const fallidos = resultados.filter((r) => !r.datos).map((r) => r.enlace);
   const nullRatio = totalAttempted > 0 ? nullCount / totalAttempted : 0;
+  const MIN_INTENTOS_PARA_BLOQUEO = 5;
 
-  if (nullRatio > 0.6) {
+  if (totalAttempted >= MIN_INTENTOS_PARA_BLOQUEO && nullRatio > 0.6) {
     console.warn(`   Alta tasa de fichas vacías (${(nullRatio * 100).toFixed(0)}%). Posible bloqueo de Google.`);
-    throw new BlockError(`Posible bloqueo: ${(nullRatio * 100).toFixed(0)}% de fichas vacías`);
+    throw new BlockError(
+      `Posible bloqueo: ${(nullRatio * 100).toFixed(0)}% de fichas vacías`,
+      negocios,
+      fallidos
+    );
   }
 
-  return validos;
+  return { negocios, fallidos };
 }
 
 // ─── PROCESAR UN NEGOCIO ──────────────────────────────────────────
@@ -702,6 +976,9 @@ async function procesarNegocio(negocio, browser, terminoBusqueda, categoriaUsuar
     instagram: "",
     facebook: "",
     tiktok: "",
+    fuenteInstagram: "",
+    fuenteFacebook: "",
+    fuenteTikTok: "",
   };
   let metodo = "maps";
   let via = "—";
@@ -713,18 +990,26 @@ async function procesarNegocio(negocio, browser, terminoBusqueda, categoriaUsuar
       const m = web.match(/facebook\.com\/([^\s"'<>?#]+)/i);
       if (m) datos.facebook = `facebook.com/${m[1]}`;
     } else if (/instagram\.com\//i.test(web)) {
-      const m = web.match(/instagram\.com\/([a-zA-Z0-9._]{2,40})/i);
-      if (m) datos.instagram = `instagram.com/${m[1]}`;
+      const usuario = extraerUsuarioInstagram(web);
+      if (usuario) datos.instagram = `instagram.com/${usuario}`;
     } else if (/tiktok\.com\/@/i.test(web)) {
       const m = web.match(/tiktok\.com\/@([^\s"'<>?/]+)/i);
-      if (m) datos.tiktok = `tiktok.com/@${m[1]}`;
+      if (m && !TIKTOK_RESERVED.has(m[1].toLowerCase())) datos.tiktok = `tiktok.com/@${m[1]}`;
     } else if (esUrlWhatsApp(web)) {
       datos.whatsapp = web;
     }
   }
 
-  // Saltar webs que son redes sociales (no se pueden scrapear)
-  const esRedSocial = /facebook\.com|instagram\.com|tiktok\.com|wa\.me|wa\.link/i.test(negocio.web);
+  // Saltar webs que son redes sociales o agregadores (no se pueden scrapear)
+  const partesRedSocial = [
+    "facebook\\.com", "instagram\\.com", "tiktok\\.com", "wa\\.me", "wa\\.link",
+    ...DOMINIOS_AGREGADORES.map((d) => d.replace(/\./g, "\\."))
+  ].filter(Boolean);
+  const esRedSocial = partesRedSocial.length > 0
+    ? new RegExp(partesRedSocial.join("|"), "i").test(negocio.web)
+    : false;
+
+  let errorWeb = null;
 
   if (CONFIG.visitarWebDelNegocio && negocio.web && !esRedSocial) {
     try {
@@ -748,13 +1033,38 @@ async function procesarNegocio(negocio, browser, terminoBusqueda, categoriaUsuar
         datos = datosPrincipal;
       }
     } catch (err) {
-      console.warn(`   No se pudo visitar web (${negocio.web}): ${err.message}`);
+      const msg = err.message.slice(0, 80);
+      console.warn(`   No se pudo visitar web (${negocio.web}): ${msg}`);
+      errorWeb = msg;
     }
   }
 
   const telefonoMaps = negocio.telefono
-    ? limpiarTelefonos(negocio.telefono) || negocio.telefono
+    ? limpiarTelefonoUnico(negocio.telefono) || "—"
     : "";
+
+  // Validación opcional: descartar URLs que devuelvan 4xx/5xx
+  if (CONFIG.validarRedes) {
+    for (const campo of ['instagram', 'facebook', 'tiktok']) {
+      const valor = datos[campo];
+      if (!valor || valor === '—') continue;
+      const partes = valor.split(' | ');
+      const validadas = [];
+      for (const p of partes) {
+        const url = p.startsWith('http') ? p : `https://${p}`;
+        if (await validarUrlRedSocial(url)) validadas.push(p);
+      }
+      datos[campo] = validadas.length ? validadas.join(' | ') : '';
+    }
+  }
+
+  const estadoFinal = !negocio.web
+    ? "Sin web"
+    : esRedSocial
+    ? "Red social/agregador"
+    : errorWeb
+    ? `Web: ${errorWeb}`
+    : "OK";
 
   return {
     Nombre: limpiarTexto(negocio.nombre) || "—",
@@ -767,13 +1077,16 @@ async function procesarNegocio(negocio, browser, terminoBusqueda, categoriaUsuar
     Instagram: datos.instagram || "—",
     Facebook: datos.facebook || "—",
     TikTok: datos.tiktok || "—",
+    FuenteInstagram: datos.fuenteInstagram || "",
+    FuenteFacebook: datos.fuenteFacebook || "",
+    FuenteTikTok: datos.fuenteTikTok || "",
     Dirección: limpiarTexto(negocio.direccion) || "—",
     Web: negocio.web || "—",
     URLMaps: negocio.urlMaps || "—",
     Búsqueda: terminoBusqueda,
     Método: metodo,
     Vía: via,
-    Estado: "OK",
+    Estado: estadoFinal,
   };
 }
 
@@ -788,13 +1101,16 @@ async function procesarNegocioConError(negocio, browser, termino, categoria) {
       Nombre: negocio.nombre || "ERROR",
       Categoría: negocio.categoria || "",
       Valoración: "",
-      "Teléfono Maps": negocio.telefono ? limpiarTelefonos(negocio.telefono) || negocio.telefono : "",
+      "Teléfono Maps": negocio.telefono ? limpiarTelefonoUnico(negocio.telefono) || "—" : "",
       "Teléfono Web": "",
       Correo: "",
       WhatsApp: "",
       Instagram: "",
       Facebook: "",
       TikTok: "",
+      FuenteInstagram: "",
+      FuenteFacebook: "",
+      FuenteTikTok: "",
       Dirección: negocio.direccion || "",
       Web: negocio.web || "",
       URLMaps: negocio.urlMaps || "",
@@ -827,7 +1143,9 @@ async function guardarExcel(datos, ruta) {
     { header: "Web", key: "Web", width: 40 },
     { header: "URL Maps", key: "URLMaps", width: 45 },
     { header: "Búsqueda", key: "Búsqueda", width: 35 },
-    { header: "Estado", key: "Estado", width: 14 },
+    { header: "Método", key: "Método", width: 12 },
+    { header: "Vía", key: "Vía", width: 12 },
+    { header: "Estado", key: "Estado", width: 18 },
   ];
 
   ws.getRow(1).eachCell((cell) => {
@@ -857,10 +1175,59 @@ async function guardarExcel(datos, ruta) {
     row.alignment = { vertical: "middle" };
   });
 
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 15 } };
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 17 } };
   ws.views = [{ state: "frozen", ySplit: 1 }];
 
   await wb.xlsx.writeFile(ruta);
+}
+
+// ─── EXPORTAR EXCEL DESDE BD ───────────────────────────────────────
+
+async function exportarExcel() {
+  const todos = db.prepare(
+    `SELECT nombre, categoria, valoracion, telefono_maps, telefono_web,
+            correo, whatsapp, instagram, facebook, tiktok,
+            direccion, web, url_maps, busqueda, metodo, via, estado
+     FROM negocios ORDER BY id`
+  ).all();
+
+  const exportData = todos.map((r) => ({
+    Nombre: r.nombre || "—",
+    Categoría: r.categoria || "—",
+    Valoración: r.valoracion || "—",
+    "Teléfono Maps": r.telefono_maps || "—",
+    "Teléfono Web": r.telefono_web || "—",
+    Correo: r.correo || "—",
+    WhatsApp: r.whatsapp || "—",
+    Instagram: r.instagram || "—",
+    Facebook: r.facebook || "—",
+    TikTok: r.tiktok || "—",
+    Dirección: r.direccion || "—",
+    Web: r.web || "—",
+    URLMaps: r.url_maps || "—",
+    Búsqueda: r.busqueda || "—",
+    Método: r.metodo || "—",
+    Vía: r.via || "—",
+    Estado: r.estado || "—",
+  }));
+
+  checkpointWAL();
+  await guardarExcel(exportData, CONFIG.archivoExcel);
+
+  const ok = todos.filter((r) => r.estado === "OK").length;
+  const err = todos.filter((r) => r.estado !== "OK").length;
+
+  const busquedasUnicas = new Set(todos.map((r) => r.busqueda).filter(Boolean)).size;
+
+  console.log(`\n${"═".repeat(50)}`);
+  console.log(` Exportación completada`);
+  console.log(`   Búsquedas     : ${busquedasUnicas}`);
+  console.log(`   Negocios      : ${todos.length}`);
+  console.log(`   Exitosos      : ${ok}`);
+  console.log(`   Con error     : ${err}`);
+  console.log(`   Archivo       : ${CONFIG.archivoExcel}`);
+  console.log(`   BD SQLite     : ${DB_PATH}`);
+  console.log(`${"═".repeat(50)}\n`);
 }
 
 // ─── REANUDACIÓN ─────────────────────────────────────────────────
@@ -872,53 +1239,76 @@ function terminoYaProcesado(termino) {
   return row.count > 0;
 }
 
-// ─── MAIN ─────────────────────────────────────────────────────────
+// ─── INTERRUPCIÓN POR TECLA ─────────────────────────────────────────
 
-function mostrarBanner() {
-  const spiderLines = [
-    "                                     ",
-    "         *                  *        ",
-    "         *                  *        ",
-    "         *                 **        ",
-    "         +*=+* +=;;;+********        ",
-    "          +=++++:;:-:;-+**+*         ",
-    "     *=**++++***+++*+****++**+*+*    ",
-    "    *******+**+*-*-=+ +***********   ",
-    "   +     *******==**= **+*=*=    =*  ",
-    "  *    **** ***  -  - ***+ ***+   ** ",
-    "      *++*  * +       =* + *+****    ",
-    "      *  +* *           ** ** **     ",
-    "      *  *+                ** **     ",
-    "       *  +*+            ***  *      ",
-    "            *           +*           ",
-    "             +         *             ",
-  ];
+let accionInterrupcion = null;
 
-  const titulo = [
-    "  GOOGLE MAPS",
-    "    CONTACT",
-    "    SCRAPER",
-    "     PERU v2",
-  ];
-  const anchoTitulo = 18;
+function activarManejadorInterrupcion() {
+  const rl = require("readline");
+  rl.emitKeypressEvents(process.stdin);
+  try { process.stdin.setRawMode(true); } catch (e) {}
+  process.stdin.resume();
 
-  const alto = spiderLines.length;
-  const padTop = Math.floor((alto - titulo.length) / 2);
-  const padBot = alto - titulo.length - padTop;
+  process.stdin.on("keypress", (_str, key) => {
+    if (!key) return;
 
-  const columnaTitulo = [];
-  for (let i = 0; i < padTop; i++) columnaTitulo.push("".padEnd(anchoTitulo));
-  for (const t of titulo) columnaTitulo.push(t.padEnd(anchoTitulo));
-  for (let i = 0; i < padBot; i++) columnaTitulo.push("".padEnd(anchoTitulo));
+    // Cualquier tecla muestra el menú (solo si no estamos ya en uno)
+    if (accionInterrupcion === null) {
+      mostrarMenuInterrupcion();
+      return;
+    }
 
-  for (let i = 0; i < alto; i++) {
-    console.log(columnaTitulo[i] + "  " + spiderLines[i]);
-  }
+    // Respuesta al menú
+    if (accionInterrupcion === "pendiente") {
+      const r = (_str || "").trim().toLowerCase();
+      if (r === "t") {
+        accionInterrupcion = "terminar";
+        console.log("   → Terminando y exportando...");
+      } else if (r === "p") {
+        accionInterrupcion = "pausar";
+        console.log("   → Pausando...");
+      } else {
+        accionInterrupcion = "continuar";
+        console.log("   → Continuando...");
+      }
+    }
+  });
 }
+
+function mostrarMenuInterrupcion() {
+  accionInterrupcion = "pendiente";
+  console.log("\n\n   ⚠  Proceso interrumpido por el usuario\n");
+  console.log(
+    `   ¿Qué deseas hacer?\n` +
+    `     [c] Continuar con las búsquedas\n` +
+    `     [t] Terminar y exportar a Excel\n` +
+    `     [p] Pausar (guardar progreso para después)\n` +
+    `   › `
+  );
+}
+
+// Restaurar raw mode al salir para no dejar la terminal mal
+process.on("exit", () => {
+  try { if (process.stdin.isRaw) process.stdin.setRawMode(false); } catch (e) {}
+});
+
+// ─── MAIN ─────────────────────────────────────────────────────────
 
 async function main() {
   mostrarBanner();
+
+  // Modo --export: solo genera Excel desde la BD sin scrapear
+  if (process.argv.includes("--export")) {
+    console.log(`\n   Modo exportación: generando Excel desde la BD...\n`);
+    checkpointWAL();
+    await exportarExcel();
+    db.close();
+    return;
+  }
+
+  console.log(`\n   ${'\x1b[36m'}ℹ${'\x1b[0m'}  Presiona ${'\x1b[1m'}cualquier tecla${'\x1b[0m'} durante el scraping para pausar.\n`);
   await preguntarConfiguracion();
+  activarManejadorInterrupcion();
   const terminos = generarTerminosDeBusqueda();
   const totalCombinaciones = CONFIG.CATEGORIAS.length * CONFIG.DISTRITOS.length;
   const concurrencia = CONFIG.concurrencia || 5;
@@ -931,6 +1321,7 @@ async function main() {
   console.log(`   Max. negocios por busqueda : ${CONFIG.maxResultadosPorBusqueda}`);
   console.log(`   Concurrencia fichas: ${concurrenciaFichas}`);
   console.log(`   Concurrencia webs: ${concurrencia}`);
+   console.log(`   Presiona cualquier tecla para pausar\n`);
   console.log(`${"─".repeat(50)}\n`);
 
   const browser = await puppeteer.launch({
@@ -976,9 +1367,11 @@ async function main() {
 
       let negocios = [];
       let fichasOk = false;
+      let enlacesPendientes = enlaces;
       for (let intento = 0; intento < 3; intento++) {
         try {
-          negocios = await procesarFichasEnParalelo(enlaces, gestor, concurrenciaFichas);
+          const resultado = await procesarFichasEnParalelo(enlacesPendientes, gestor, concurrenciaFichas);
+          negocios = negocios.concat(resultado.negocios);
           fichasOk = true;
           break;
         } catch (err) {
@@ -986,6 +1379,8 @@ async function main() {
             console.error(`   Error inesperado en fichas: ${err.message}`);
             break;
           }
+          negocios = negocios.concat(err.negociosParciales || []);
+          enlacesPendientes = err.enlacesFallidos || enlacesPendientes;
           if (intento < 2) {
             console.warn(`   Reintentando tras posible bloqueo (intento ${intento + 1}/3) en 60s...`);
             await esperarMs(60000);
@@ -993,14 +1388,18 @@ async function main() {
         }
       }
       if (!fichasOk) {
-        console.error(`   Bloqueo persistente en fichas. Saltando término.`);
-        guardarNegocio({
-          Nombre: "ERROR-BUSQUEDA",
-          Categoría: catUsuario,
-          Búsqueda: termino,
-          Estado: "Bloqueo persistente en extracción de fichas",
-        });
-        continue;
+        if (negocios.length > 0) {
+          console.warn(`   Bloqueo persistente, pero se conservan ${negocios.length} fichas parciales extraídas antes del bloqueo.`);
+        } else {
+          console.error(`   Bloqueo persistente en fichas. Saltando término.`);
+          guardarNegocio({
+            Nombre: "ERROR-BUSQUEDA",
+            Categoría: catUsuario,
+            Búsqueda: termino,
+            Estado: "Bloqueo persistente en extracción de fichas",
+          });
+          continue;
+        }
       }
 
       console.log(`   Extraidas ${negocios.length} fichas. Enriquiciendo (concurrencia: ${concurrencia})...`);
@@ -1017,8 +1416,17 @@ async function main() {
 
       const total = contarNegocios();
       console.log(`   Almacenados: ${resultados.length} registros  Total en BD: ${total}`);
+      checkpointWAL();
 
-      if (i < terminos.length - 1) {
+      // — Verificar interrupción (Ctrl+C)
+      if (accionInterrupcion === "terminar" || accionInterrupcion === "pausar") {
+        break;
+      }
+      if (accionInterrupcion === "continuar") {
+        accionInterrupcion = null;
+      }
+
+      if (i < terminos.length - 1 && !accionInterrupcion) {
         await esperarAleatorio(
           CONFIG.esperaMsEntreBusquedas,
           CONFIG.esperaMsEntreBusquedas + 2000
@@ -1032,46 +1440,23 @@ async function main() {
 
   // ─── EXPORTAR A EXCEL DESDE SQLITE ─────────────────────────────
 
-  const todos = db.prepare(
-    `SELECT nombre, categoria, valoracion, telefono_maps, telefono_web,
-            correo, whatsapp, instagram, facebook, tiktok,
-            direccion, web, url_maps, busqueda, estado
-     FROM negocios ORDER BY id`
-  ).all();
+  if (accionInterrupcion === "pausar") {
+    checkpointWAL();
+    const totalPausa = contarNegocios();
+    console.log(`\n${"═".repeat(50)}`);
+    console.log(` Proceso pausado`);
+    console.log(`   Negocios recolectados: ${totalPausa}`);
+    console.log(`   Los datos están guardados en la BD.`);
+    console.log(`   Para reanudar, ejecuta npm start nuevamente.`);
+    console.log(`   Los términos ya procesados se saltarán automáticamente.`);
+    console.log(`${"═".repeat(50)}\n`);
+    db.close();
+    return;
+  }
 
-  const exportData = todos.map((r) => ({
-    Nombre: r.nombre || "—",
-    Categoría: r.categoria || "—",
-    Valoración: r.valoracion || "—",
-    "Teléfono Maps": r.telefono_maps || "—",
-    "Teléfono Web": r.telefono_web || "—",
-    Correo: r.correo || "—",
-    WhatsApp: r.whatsapp || "—",
-    Instagram: r.instagram || "—",
-    Facebook: r.facebook || "—",
-    TikTok: r.tiktok || "—",
-    Dirección: r.direccion || "—",
-    Web: r.web || "—",
-    URLMaps: r.url_maps || "—",
-    Búsqueda: r.busqueda || "—",
-    Estado: r.estado || "—",
-  }));
+  await exportarExcel();
 
-  await guardarExcel(exportData, CONFIG.archivoExcel);
-
-  const ok = todos.filter((r) => r.estado === "OK").length;
-  const err = todos.filter((r) => r.estado !== "OK").length;
-
-  console.log(`\n${"═".repeat(50)}`);
-  console.log(` Proceso completo`);
-  console.log(`   Busquedas     : ${terminos.length}`);
-  console.log(`   Negocios      : ${todos.length}`);
-  console.log(`   Exitosos      : ${ok}`);
-  console.log(`   Con error     : ${err}`);
-  console.log(`   Archivo       : ${CONFIG.archivoExcel}`);
-  console.log(`   BD SQLite     : ${DB_PATH}`);
-  console.log(`${"═".repeat(50)}\n`);
-
+  checkpointWAL();
   db.close();
 }
 
