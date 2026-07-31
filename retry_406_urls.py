@@ -11,6 +11,15 @@ import urllib.request
 import urllib.error
 from html.parser import HTMLParser
 
+with open("tlds.json", encoding="utf-8") as f:
+    TLDS_VALIDOS = set(t.upper() for t in json.load(f))
+
+with open("config.json", encoding="utf-8") as f:
+    _cfg = json.load(f)
+
+PALABRAS_PLACEHOLDER = [p.lower() for p in _cfg.get("palabrasLocalPlaceholder", [])]
+DOMINIOS_PLACEHOLDER = [d.lower() for d in _cfg.get("dominiosPlaceholder", [])]
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
@@ -30,12 +39,12 @@ def extract_emails(text):
     validos = []
     for e in raw:
         local, dominio = e.split("@", 1)
-        tld = dominio.rsplit(".", 1)[-1]
-        if len(tld) < 2 or len(dominio) < 4:
+        tld = dominio.rsplit(".", 1)[-1].upper()
+        if tld not in TLDS_VALIDOS:
             continue
-        if dominio in ("example.com", "domain.com", "test.com"):
+        if any(p in local for p in PALABRAS_PLACEHOLDER):
             continue
-        if local in ("elcorreoquequieres", "tuemail", "tucorreo", "example", "test"):
+        if dominio in DOMINIOS_PLACEHOLDER:
             continue
         validos.append(e)
     return validos

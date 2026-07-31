@@ -1,7 +1,7 @@
 {
   "archivoExcel": "contactos.xlsx",
   "maxResultadosPorBusqueda": 50,
-  "visitarWebDelNegocio": false,
+  "visitarWebDelNegocio": true,
   "esperaMsEntreBusquedas": 3000,
   "umbralTextoUtil": 400,
   "concurrencia": 5,

@@ -17,6 +17,28 @@ if (!fs.existsSync(configPath)) {
 const CONFIG = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 // ─────────────────────────────────────────────────────────────────
 
+// ─── USER-AGENT ────────────────────────────────────────────────────
+
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+];
+
+function uaAleatorio() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+async function configurarPagina(page) {
+  await page.setUserAgent(uaAleatorio());
+  await page.setRequestInterception(true);
+  page.on("request", (req) => {
+    ["image", "stylesheet", "font", "media"].includes(req.resourceType())
+      ? req.abort()
+      : req.continue();
+  });
+}
+
 // ─── CONFIGURACIÓN INTERACTIVA (categorías y distritos) ──────────
 
 const rl = readline.createInterface({
@@ -313,7 +335,7 @@ async function validarUrlRedSocial(urlCompleta) {
       method: 'HEAD',
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        "User-Agent": uaAleatorio(),
       },
       redirect: 'follow',
     });
@@ -349,7 +371,7 @@ function esCorreoValido(correo) {
   return true;
 }
 
-function limpiarTelefonoUnico(texto) {
+function extraerNumeroDeWhatsApp(href) {
   try {
     const parsed = new URL(href);
     const porPath = parsed.pathname.match(/\/([\d]+)/);
@@ -358,6 +380,14 @@ function limpiarTelefonoUnico(texto) {
   } catch (_) {
     return "";
   }
+}
+
+function limpiarTelefonoMaps(texto) {
+  if (!texto || texto === "—") return "";
+  const digitos = texto.replace(/\D/g, "");
+  if (!digitos) return "";
+  const normalizado = normalizarTelefonoPe(digitos);
+  return esTelefonoValido(normalizado) ? normalizado : "";
 }
 
 function esUrlWhatsApp(href) {
@@ -588,9 +618,7 @@ function extraerRedesSociales($) {
           return;
         }
         if (parsed.protocol === 'whatsapp:' && !parsed.searchParams.get('phone') && !parsed.pathname.match(/\/([\d]+)/)) return;
-        const porPath = parsed.pathname.match(/\/([\d]+)/);
-        const porParam = parsed.searchParams.get("phone");
-        const numero = (porPath?.[1] || porParam || "").replace(/\D/g, "");
+        const numero = extraerNumeroDeWhatsApp(href);
         if (numero.length >= 7) {
           redes.WhatsApp.add(`https://wa.me/${numero}`);
         } else {
@@ -648,19 +676,25 @@ function extraerDatosDeHtml(html) {
   };
 }
 
+// ─── SELECTORES FRÁGILES DE GOOGLE MAPS ─────────────────────────
+
+const SELECTORES_MAPS = {
+  nombre: "h1",
+  telefonoBoton: 'button[data-item-id^="phone"]',
+  direccionBoton: 'button[data-item-id="address"]',
+  webEnlace: 'a[data-item-id="authority"]',
+  categoriaBoton: 'button[jsaction*="category"]',
+  categoriaFallback: ".DkEaL",
+  valoracion: ".F7nice span",
+};
+
+// ─────────────────────────────────────────────────────────────────
+
 // ─── VISITAR WEB DEL NEGOCIO ──────────────────────────────────────
 
 async function visitarWebConPuppeteer(url, browser) {
   const page = await browser.newPage();
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-  );
-  await page.setRequestInterception(true);
-  page.on("request", (req) => {
-    ["image", "stylesheet", "font", "media"].includes(req.resourceType())
-      ? req.abort()
-      : req.continue();
-  });
+  await configurarPagina(page);
 
   let html = "";
   try {
@@ -685,8 +719,7 @@ async function visitarWebConFetch(url) {
   const res = await fetch(url, {
     signal: controller.signal,
     headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "User-Agent": uaAleatorio(),
     },
   });
 
@@ -745,15 +778,7 @@ async function crearPoolPaginas(browser, n) {
   const paginas = [];
   for (let i = 0; i < n; i++) {
     const p = await browser.newPage();
-    await p.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-    );
-    await p.setRequestInterception(true);
-    p.on("request", (req) => {
-      ["image", "stylesheet", "font", "media"].includes(req.resourceType())
-        ? req.abort()
-        : req.continue();
-    });
+    await configurarPagina(p);
     paginas.push(p);
   }
   return paginas;
@@ -779,53 +804,48 @@ function crearGestorPool(paginas) {
 
 async function extraerFichaNegocio(pagina, enlace) {
   await pagina.goto(enlace, { waitUntil: "domcontentloaded", timeout: 15000 });
-  await pagina.waitForSelector("h1", { timeout: 6000 }).catch(() => {});
+  await pagina.waitForSelector(SELECTORES_MAPS.nombre, { timeout: 6000 }).catch(() => {});
 
   const datos = await conReintentoNavegacion(
-    () => pagina.evaluate(() => {
-      const txt = (sel) => document.querySelector(sel)?.textContent?.trim() || "";
+    () => pagina.evaluate((sel) => {
+      const txt = (s) => document.querySelector(s)?.textContent?.trim() || "";
+      const nombre = txt(sel.nombre);
 
-    const nombre = txt("h1");
+      let telefono = "";
+      const btnTelefono = document.querySelector(sel.telefonoBoton);
+      if (btnTelefono) {
+        telefono = btnTelefono.getAttribute("aria-label")?.replace(/^Teléfono:\s*/i, "") || "";
+      }
+      if (!telefono) {
+        const btnGenerico = [...document.querySelectorAll("button[aria-label]")].find((btn) => {
+          const label = btn.getAttribute("aria-label") || "";
+          return /^\+?[\d\s\-().]{7,}$/.test(label.trim());
+        });
+        if (btnGenerico) telefono = btnGenerico.getAttribute("aria-label").trim();
+      }
 
-    let telefono = "";
-    const btnTelefono = document.querySelector('button[data-item-id^="phone"]');
-    if (btnTelefono) {
-      telefono = btnTelefono.getAttribute("aria-label")?.replace(/^Teléfono:\s*/i, "") || "";
-    }
-    if (!telefono) {
-      const btnGenerico = [...document.querySelectorAll("button[aria-label]")].find((btn) => {
-        const label = btn.getAttribute("aria-label") || "";
-        return /^\+?[\d\s\-().]{7,}$/.test(label.trim());
+      let direccion = "";
+      document.querySelectorAll(sel.direccionBoton).forEach((btn) => {
+        direccion = btn.getAttribute("aria-label")?.replace(/^Dirección:\s*/i, "") || "";
       });
-      if (btnGenerico) telefono = btnGenerico.getAttribute("aria-label").trim();
-    }
 
-    let direccion = "";
-    document.querySelectorAll('button[data-item-id="address"]').forEach((btn) => {
-      direccion =
-        btn.getAttribute("aria-label")?.replace(/^Dirección:\s*/i, "") || "";
-    });
+      let web = "";
+      document.querySelectorAll(sel.webEnlace).forEach((a) => { web = a.href || ""; });
+      if (!web) {
+        document.querySelectorAll("a[aria-label]").forEach((a) => {
+          if (/sitio web/i.test(a.getAttribute("aria-label") || "")) web = a.href;
+        });
+      }
 
-    let web = "";
-    document.querySelectorAll('a[data-item-id="authority"]').forEach((a) => {
-      web = a.href || "";
-    });
-    if (!web) {
-      document.querySelectorAll("a[aria-label]").forEach((a) => {
-        if (/sitio web/i.test(a.getAttribute("aria-label") || "")) web = a.href;
-      });
-    }
+      const categoria =
+        txt(sel.categoriaBoton) ||
+        document.querySelector(sel.categoriaFallback)?.textContent?.trim() ||
+        "";
 
-    const categoria =
-      txt('button[jsaction*="category"]') ||
-      document.querySelector(".DkEaL")?.textContent?.trim() ||
-      "";
+      const valoracion = txt(sel.valoracion) || txt('[aria-label*="estrellas"]') || "";
 
-    const valoracion =
-      txt(".F7nice span") || txt('[aria-label*="estrellas"]') || "";
-
-    return { nombre, telefono, direccion, web, categoria, valoracion };
-    }),
+      return { nombre, telefono, direccion, web, categoria, valoracion };
+    }, SELECTORES_MAPS),
     "extraerFichaNegocio.evaluate()"
   );
 
@@ -847,15 +867,7 @@ async function detectarBloqueo(page) {
 
 async function buscarEnMaps(termino, browser) {
   const page = await browser.newPage();
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-  );
-  await page.setRequestInterception(true);
-  page.on("request", (req) => {
-    ["image", "stylesheet", "font", "media"].includes(req.resourceType())
-      ? req.abort()
-      : req.continue();
-  });
+  await configurarPagina(page);
 
   try {
     const url = `https://www.google.com/maps/search/${encodeURIComponent(termino)}`;
@@ -923,44 +935,53 @@ async function procesarFichasEnParalelo(enlaces, gestor, concurrenciaFichas) {
   if (limite === 0) return { negocios: [], fallidos: [] };
 
   const limitFichas = pLimit(concurrenciaFichas);
+  const TAMANO_LOTE = concurrenciaFichas * 3;
+  const enlacesRecortados = enlaces.slice(0, limite);
+
+  let negocios = [];
+  let fallidos = [];
   let totalAttempted = 0;
   let nullCount = 0;
 
-  console.log(`   Extrayendo ${limite} fichas (${concurrenciaFichas} en paralelo)...`);
+  for (let inicio = 0; inicio < enlacesRecortados.length; inicio += TAMANO_LOTE) {
+    const lote = enlacesRecortados.slice(inicio, inicio + TAMANO_LOTE);
 
-  const resultados = await Promise.all(
-    enlaces.slice(0, limite).map((enlace) =>
-      limitFichas(async () => {
-        const pagina = await gestor.obtener();
-        totalAttempted++;
-        try {
-          const datos = await extraerFichaNegocio(pagina, enlace);
-          await esperarAleatorio(300, 700);
-          if (!datos) nullCount++;
-          return { enlace, datos };
-        } catch (err) {
-          console.warn(`   Error en ficha: ${err.message}`);
-          nullCount++;
-          return { enlace, datos: null };
-        } finally {
-          gestor.liberar(pagina);
-        }
-      })
-    )
-  );
-
-  const negocios = resultados.filter((r) => r.datos).map((r) => r.datos);
-  const fallidos = resultados.filter((r) => !r.datos).map((r) => r.enlace);
-  const nullRatio = totalAttempted > 0 ? nullCount / totalAttempted : 0;
-  const MIN_INTENTOS_PARA_BLOQUEO = 5;
-
-  if (totalAttempted >= MIN_INTENTOS_PARA_BLOQUEO && nullRatio > 0.6) {
-    console.warn(`   Alta tasa de fichas vacías (${(nullRatio * 100).toFixed(0)}%). Posible bloqueo de Google.`);
-    throw new BlockError(
-      `Posible bloqueo: ${(nullRatio * 100).toFixed(0)}% de fichas vacías`,
-      negocios,
-      fallidos
+    const resultados = await Promise.all(
+      lote.map((enlace) =>
+        limitFichas(async () => {
+          const pagina = await gestor.obtener();
+          totalAttempted++;
+          try {
+            const datos = await extraerFichaNegocio(pagina, enlace);
+            await esperarAleatorio(300, 700);
+            if (!datos) nullCount++;
+            return { enlace, datos };
+          } catch (err) {
+            console.warn(`   Error en ficha: ${err.message}`);
+            nullCount++;
+            return { enlace, datos: null };
+          } finally {
+            gestor.liberar(pagina);
+          }
+        })
+      )
     );
+
+    negocios = negocios.concat(resultados.filter((r) => r.datos).map((r) => r.datos));
+    fallidos = fallidos.concat(resultados.filter((r) => !r.datos).map((r) => r.enlace));
+
+    const nullRatio = totalAttempted > 0 ? nullCount / totalAttempted : 0;
+    const MIN_INTENTOS_PARA_BLOQUEO = 5;
+
+    if (totalAttempted >= MIN_INTENTOS_PARA_BLOQUEO && nullRatio > 0.6) {
+      console.warn(`   Alta tasa de fichas vacías (${(nullRatio * 100).toFixed(0)}%). Posible bloqueo de Google.`);
+      const restantes = enlacesRecortados.slice(inicio + TAMANO_LOTE);
+      throw new BlockError(
+        `Posible bloqueo: ${(nullRatio * 100).toFixed(0)}% de fichas vacías`,
+        negocios,
+        [...fallidos, ...restantes]
+      );
+    }
   }
 
   return { negocios, fallidos };
@@ -1015,8 +1036,8 @@ async function procesarNegocio(negocio, browser, terminoBusqueda, categoriaUsuar
     try {
       const resultadoPrincipal = await visitarUrl(negocio.web, browser);
       const datosPrincipal = extraerDatosDeHtml(resultadoPrincipal.html);
-      via = resultadoPrincipal.via;
       metodo = "maps+web";
+      via = resultadoPrincipal.via;
 
       const urlContacto = buscarUrlContacto(datosPrincipal.$, negocio.web);
 
@@ -1040,7 +1061,7 @@ async function procesarNegocio(negocio, browser, terminoBusqueda, categoriaUsuar
   }
 
   const telefonoMaps = negocio.telefono
-    ? limpiarTelefonoUnico(negocio.telefono) || "—"
+    ? limpiarTelefonoMaps(negocio.telefono) || "—"
     : "";
 
   // Validación opcional: descartar URLs que devuelvan 4xx/5xx
@@ -1066,7 +1087,7 @@ async function procesarNegocio(negocio, browser, terminoBusqueda, categoriaUsuar
     ? `Web: ${errorWeb}`
     : "OK";
 
-  return {
+return {
     Nombre: limpiarTexto(negocio.nombre) || "—",
     Categoría: categoriaUsuario || limpiarTexto(negocio.categoria) || "—",
     Valoración: negocio.valoracion || "—",
@@ -1101,7 +1122,7 @@ async function procesarNegocioConError(negocio, browser, termino, categoria) {
       Nombre: negocio.nombre || "ERROR",
       Categoría: negocio.categoria || "",
       Valoración: "",
-      "Teléfono Maps": negocio.telefono ? limpiarTelefonoUnico(negocio.telefono) || "—" : "",
+      "Teléfono Maps": negocio.telefono ? limpiarTelefonoMaps(negocio.telefono) || "—" : "",
       "Teléfono Web": "",
       Correo: "",
       WhatsApp: "",
@@ -1242,6 +1263,13 @@ function terminoYaProcesado(termino) {
 // ─── INTERRUPCIÓN POR TECLA ─────────────────────────────────────────
 
 let accionInterrupcion = null;
+let resolverMenu = null;
+
+function esperarRespuestaMenu() {
+  return new Promise((resolve) => {
+    resolverMenu = resolve;
+  });
+}
 
 function activarManejadorInterrupcion() {
   const rl = require("readline");
@@ -1252,37 +1280,35 @@ function activarManejadorInterrupcion() {
   process.stdin.on("keypress", (_str, key) => {
     if (!key) return;
 
-    // Cualquier tecla muestra el menú (solo si no estamos ya en uno)
-    if (accionInterrupcion === null) {
-      mostrarMenuInterrupcion();
-      return;
-    }
-
-    // Respuesta al menú
-    if (accionInterrupcion === "pendiente") {
+    // Modo menú: capturar respuesta
+    if (resolverMenu) {
       const r = (_str || "").trim().toLowerCase();
       if (r === "t") {
         accionInterrupcion = "terminar";
         console.log("   → Terminando y exportando...");
-      } else if (r === "p") {
-        accionInterrupcion = "pausar";
-        console.log("   → Pausando...");
       } else {
         accionInterrupcion = "continuar";
-        console.log("   → Continuando...");
+        console.log("   → Continuando proceso...");
       }
+      const resolve = resolverMenu;
+      resolverMenu = null;
+      resolve();
+      return;
+    }
+
+    // Primera tecla durante scraping: marcar como interrumpido (sin mostrar menú aún)
+    if (accionInterrupcion === null) {
+      accionInterrupcion = "interrumpido";
     }
   });
 }
 
 function mostrarMenuInterrupcion() {
-  accionInterrupcion = "pendiente";
   console.log("\n\n   ⚠  Proceso interrumpido por el usuario\n");
   console.log(
     `   ¿Qué deseas hacer?\n` +
-    `     [c] Continuar con las búsquedas\n` +
+    `     [c] Continuar proceso\n` +
     `     [t] Terminar y exportar a Excel\n` +
-    `     [p] Pausar (guardar progreso para después)\n` +
     `   › `
   );
 }
@@ -1291,6 +1317,19 @@ function mostrarMenuInterrupcion() {
 process.on("exit", () => {
   try { if (process.stdin.isRaw) process.stdin.setRawMode(false); } catch (e) {}
 });
+
+let browserActivo = null;
+
+async function cerrarLimpio(señal) {
+  console.log(`\n\n   Señal ${señal} recibida, cerrando navegador y BD...`);
+  try { if (browserActivo) await browserActivo.close(); } catch (_) {}
+  try { checkpointWAL(); db.close(); } catch (_) {}
+  try { if (process.stdin.isRaw) process.stdin.setRawMode(false); } catch (_) {}
+  process.exit(0);
+}
+
+process.on("SIGINT", () => cerrarLimpio("SIGINT"));
+process.on("SIGTERM", () => cerrarLimpio("SIGTERM"));
 
 // ─── MAIN ─────────────────────────────────────────────────────────
 
@@ -1306,7 +1345,7 @@ async function main() {
     return;
   }
 
-  console.log(`\n   ${'\x1b[36m'}ℹ${'\x1b[0m'}  Presiona ${'\x1b[1m'}cualquier tecla${'\x1b[0m'} durante el scraping para pausar.\n`);
+  console.log(`\n   ${'\x1b[36m'}ℹ${'\x1b[0m'}  Presiona ${'\x1b[1m'}cualquier tecla${'\x1b[0m'} durante el scraping para ver opciones.\n`);
   await preguntarConfiguracion();
   activarManejadorInterrupcion();
   const terminos = generarTerminosDeBusqueda();
@@ -1321,13 +1360,14 @@ async function main() {
   console.log(`   Max. negocios por busqueda : ${CONFIG.maxResultadosPorBusqueda}`);
   console.log(`   Concurrencia fichas: ${concurrenciaFichas}`);
   console.log(`   Concurrencia webs: ${concurrencia}`);
-   console.log(`   Presiona cualquier tecla para pausar\n`);
+   console.log(`   Presiona cualquier tecla para ver opciones\n`);
   console.log(`${"─".repeat(50)}\n`);
 
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--lang=es-PE"],
   });
+  browserActivo = browser;
 
   let pool = [];
   try {
@@ -1418,11 +1458,13 @@ async function main() {
       console.log(`   Almacenados: ${resultados.length} registros  Total en BD: ${total}`);
       checkpointWAL();
 
-      // — Verificar interrupción (Ctrl+C)
-      if (accionInterrupcion === "terminar" || accionInterrupcion === "pausar") {
-        break;
-      }
-      if (accionInterrupcion === "continuar") {
+      // — Verificar interrupción (solo en punto seguro, después del batch)
+      if (accionInterrupcion !== null) {
+        mostrarMenuInterrupcion();
+        await esperarRespuestaMenu();
+        if (accionInterrupcion === "terminar") {
+          break;
+        }
         accionInterrupcion = null;
       }
 
@@ -1436,23 +1478,10 @@ async function main() {
   } finally {
     for (const p of pool) await p.close().catch(() => {});
     await browser.close();
+    browserActivo = null;
   }
 
   // ─── EXPORTAR A EXCEL DESDE SQLITE ─────────────────────────────
-
-  if (accionInterrupcion === "pausar") {
-    checkpointWAL();
-    const totalPausa = contarNegocios();
-    console.log(`\n${"═".repeat(50)}`);
-    console.log(` Proceso pausado`);
-    console.log(`   Negocios recolectados: ${totalPausa}`);
-    console.log(`   Los datos están guardados en la BD.`);
-    console.log(`   Para reanudar, ejecuta npm start nuevamente.`);
-    console.log(`   Los términos ya procesados se saltarán automáticamente.`);
-    console.log(`${"═".repeat(50)}\n`);
-    db.close();
-    return;
-  }
 
   await exportarExcel();
 
