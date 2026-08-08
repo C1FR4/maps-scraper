@@ -146,6 +146,32 @@ Genera `contactos.xlsx` con:
 
 ---
 
+## Scripts opcionales
+
+### retry_406_urls.py
+
+**Qué hace:** reintenta con Python (`urllib.request`) las webs que el scraper principal no pudo leer por error HTTP 406 (bloqueo por User-Agent/headers), usando headers más completos y rotación de User-Agent.
+
+**Cuándo usarlo:** después de una corrida completa, si hay negocios con web pero sin teléfono/correo extraído.
+
+**Cómo se usa:** `python retry_406_urls.py` desde la raíz del proyecto (solo librería estándar de Python 3, sin instalar nada extra). Actualiza `contactos.db` vía un subproceso de Node, solo llenando campos vacíos, nunca sobreescribe datos ya extraídos.
+
+**Limitación conocida:** recorre todas las webs guardadas en cada corrida, no lleva registro de cuáles ya reintentó.
+
+---
+
+### check_db.js
+
+**Qué hace:** vuelca por consola todos los campos de cada negocio guardado en `contactos.db`.
+
+**Para qué sirve:** inspección rápida sin abrir el Excel ni un cliente de SQLite — útil para depurar por qué un negocio quedó sin correo, por ejemplo.
+
+**Cómo se usa:** `node check_db.js` desde la raíz del proyecto, sin argumentos.
+
+**Nota:** imprime todos los registros sin paginar, pensado para inspección puntual, no para datasets masivos.
+
+---
+
 ## Tiempo estimado
 
 Para 30 términos (ej: 3 categorías × 10 distritos) y ~500 negocios:
