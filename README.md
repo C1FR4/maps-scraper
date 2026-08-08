@@ -54,10 +54,10 @@ Reanudación automática: si se interrumpe, retoma donde quedó
 
 ```bash
 # 1. Clona el repositorio
-git clone https://github.com/C1FR4/maps-scraper.git
+git clone https://github.com/C1FR4/spider-maps-scraper.git
 
 # 2. Instala las dependencias
-cd maps-scraper
+cd spider-maps-scraper
 npm install
 
 # 3. Ejecuta
