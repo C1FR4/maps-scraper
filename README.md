@@ -1,4 +1,4 @@
-# Google Maps Contact Scraper - Perú
+# Spider Maps Scraper - Perú
 
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
