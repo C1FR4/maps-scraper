@@ -118,7 +118,7 @@ Se pueden ajustar en `config.json` sin necesidad de editar categorías ni distri
 
 Genera `contactos.xlsx` con:
 
-- 16 columnas: incluye Método (maps / maps+web)
+- Incluye **Método** (`maps` / `maps+web`) para saber si el dato salió solo de la ficha de Maps o también se enriqueció visitando la web del negocio.
 - Encabezado azul oscuro con texto blanco, fila congelada
 - Filas con colores alternos (blanco / azul claro)
 - Filtros automáticos en todas las columnas
