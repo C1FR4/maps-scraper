@@ -1,6 +1,6 @@
 // banner.js
 // Imprime la araña ASCII + un menú/caja centrados y armonizados,
-// con colores ANSI (sin dependencias externas).
+// con colores ANSI.
 
 const fs = require("fs");
 const path = require("path");

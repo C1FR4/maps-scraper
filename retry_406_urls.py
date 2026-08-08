@@ -2,6 +2,8 @@
 Script opcional para re-intentar URLs que dieron 406 en Node.js fetch.
 Usa requests con headers más completos y rotación de User-Agent.
 Uso: python retry_406_urls.py
+# ponytail: extracción duplicada (regex correo/teléfono/placeholders viven en
+# scraper.js). Re-plegar en scraper o borrar cuando los 406 dejen de darse.
 """
 import json
 import re
