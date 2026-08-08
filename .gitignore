@@ -30,3 +30,6 @@ __pycache__/
 # Editor
 .vscode/
 .idea/
+
+# Caché del asistente (OpenCode/atlas)
+.atl/

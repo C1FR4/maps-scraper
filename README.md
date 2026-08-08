@@ -37,7 +37,7 @@ Pool persistente (4 páginas paralelas) → extrae fichas
         ↓
 Fetch-first / Puppeteer fallback → web de cada negocio
         ↓
-Detecta subpágina de contacto y la visita también
+Detecta subpágina de contacto y "sobre nosotros" y las visita también
         ↓
 Almacena en SQLite (contactos.db) → exporta a contactos.xlsx
         ↓
@@ -92,6 +92,8 @@ Escribe los valores separados por coma - puedes poner tantos como necesites:
 Cada combinación de categoría × distrito genera una búsqueda en Google Maps.  
 Por ejemplo, con 3 categorías y 3 distritos se ejecutarán 9 búsquedas.
 
+> **Modo no interactivo** (sin prompts): `node scraper.js --categorias "Cafetería, Restaurante" --distritos "Miraflores, Barranco"` — salta la configuración interactiva y arranca directo.
+
 ### Parámetros adicionales (`config.json`)
 
 Se pueden ajustar en `config.json` sin necesidad de editar categorías ni distritos:
@@ -116,7 +118,7 @@ Se pueden ajustar en `config.json` sin necesidad de editar categorías ni distri
 
 Genera `contactos.xlsx` con:
 
-- 17 columnas: incluye Método (maps / maps+web) y Vía (fetch / puppeteer)
+- 16 columnas: incluye Método (maps / maps+web)
 - Encabezado azul oscuro con texto blanco, fila congelada
 - Filas con colores alternos (blanco / azul claro)
 - Filtros automáticos en todas las columnas
